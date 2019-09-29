@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <ncurses.h>
-
+#include <math.h>
 /*
         COLOR_BLACK   0
         COLOR_RED     1
@@ -28,21 +28,21 @@ int main(int argc, char *argv[])
     
     int startx, starty, width, height;
     
-    int fft_output[] = {100,200,580,400,1000,150,670,234,
+    int fft_output[] = {1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
+                        1,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
-                        100,200,580,400,1000,150,670,234,
+                        100,200,580,400,100,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234,
@@ -66,6 +66,10 @@ int main(int argc, char *argv[])
                         100,200,580,400,1000,150,670,234,
                         100,200,580,400,1000,150,670,234
     };
+    
+    
+    for (int i=0;i<sizeof(fft_output)/sizeof(fft_output[0]);i++)
+        fft_output[i] = 500 + 500*sin((float)i/10);
     
     // Start curses
     initscr();
@@ -94,8 +98,8 @@ int main(int argc, char *argv[])
 
 int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size){
     int height, width, spaces, group_size;
-    int temp;
-    float norm_factor;
+
+    float norm_factor, temp;
     
     getmaxyx(local_win, height, width);
     spaces = width - 2;
@@ -118,12 +122,13 @@ int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size){
         
         temp = temp / group_size;
         
-        for(int y = height-2; y > temp*norm_factor; y--)
+        for(int y = height-2; y > height - 2 - temp*norm_factor; y--)
                 mvwaddch(local_win,y,k+1,'U');
+        
     }
-
-    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
+    
     wrefresh(local_win);
+    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
     
     return 0;    
 }
