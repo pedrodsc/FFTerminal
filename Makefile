@@ -1,7 +1,7 @@
 build:
-	$ gcc -o out main.c -lncurses -lm
+	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound
 run:
-	$ ./out
+	$ ./ffterminal deafult
 all:
-	$ gcc -o out main.c -lncurses -lm
-	$ ./out
+	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound
+	$ ./ffterminal deafult
