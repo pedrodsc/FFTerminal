@@ -1,7 +1,10 @@
 build:
-	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound
+	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound -Os -ffast-math
 run:
-	$ ./ffterminal deafult
+	$ ./ffterminal
 all:
-	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound
-	$ ./ffterminal deafult
+	$ gcc -o ffterminal main.c fft.c -lncurses -lm -lasound -O5 -ffast-math
+	$ ./ffterminal
+debug:
+	$ gcc -g -Wall -o ffterminal main.c fft.c -lncurses -lm -lasound
+	$ gcc -g -Wall -o a teste.c fft.c -lm -lncurses

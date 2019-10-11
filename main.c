@@ -5,6 +5,7 @@
 #include <math.h>
 #include <complex.h>
 #include <alsa/asoundlib.h>
+#include <time.h>
 
 /*
         COLOR_BLACK   0
@@ -17,33 +18,45 @@
         COLOR_WHITE   7
 */
 
-#define LOOKUP_TABLE_SIZE   2048
-#define N_SAMPLES           128
-#define NORM_FACTOR         65536
+#define N_SAMPLES           1024
+#define NORM_FACTOR         16384
 #define LEVEL_ZERO          NORM_FACTOR/2
-#define PERCENT_FRAME_Y     0.7
-#define PERCENT_FRAME_X     0.9
+#define PERCENT_FRAME_Y     0.9
+#define PERCENT_FRAME_X     0.94
+#define NO_KEY              -1
 
 WINDOW *create_newwin(int height, int width, int starty, int startx);
 void destroy_win(WINDOW *local_win);
 
-int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size);
+int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size);
+int draw_wave(WINDOW *local_win, int *samples, int size);
 
 int main(int argc, char *argv[])
 {
     int ch;
     int x = 0;
-    // fft_buffer
-    int fft_output[N_SAMPLES];
+    int avrg = 10;
     
-    for (int i=0;i<N_SAMPLES;i++)
-        fft_output[i] = LEVEL_ZERO + LEVEL_ZERO*sin((float)i/10);
+    clock_t t;
+    double elapsed_time;
+    
+    // fft_buffer
+    int samples[N_SAMPLES];
+    unsigned int fft_spectrum[N_SAMPLES];
+    double complex fft_input[N_SAMPLES];
+    double complex fft_output[N_SAMPLES];
+    double complex *lookup;
+    
+    // FFT inicialization
+    lookup = fft_create_lookup(N_SAMPLES);
     
     WINDOW *fft_frame; // Frame for the fft
+    WINDOW *audio_frame; // Frame for the fft
     int startx, starty, width, height;
     
     // Alsa variables
     int err;
+    char *capture_device = "default";
     short *buffer;
     short buffer_frames = N_SAMPLES*2;
     unsigned int rate = 44100;
@@ -53,8 +66,10 @@ int main(int argc, char *argv[])
     
        
     // Alsa inicialization
+    if (argc > 1)
+        capture_device = argv[1];
     
-    if ((err = snd_pcm_open (&capture_handle, argv[1], SND_PCM_STREAM_CAPTURE, 0)) < 0) {
+    if ((err = snd_pcm_open (&capture_handle, capture_device, SND_PCM_STREAM_CAPTURE, 0)) < 0) {
         printf("cannot open audio device %s (%s)\n", 
                  argv[1],
                  snd_strerror (err));
@@ -138,37 +153,60 @@ int main(int argc, char *argv[])
     initscr();
     cbreak();
     noecho();
-    
+    nodelay(stdscr, TRUE);
     keypad(stdscr, TRUE);
     
-    height = LINES*PERCENT_FRAME_Y;
+    height = LINES*PERCENT_FRAME_Y/2;
     width = COLS*PERCENT_FRAME_X;
-    starty = (LINES - height) / 2;
+    //width = 128;
+    starty = (LINES - height) / 4;
     startx = (COLS - width) / 2;
     
-    printw("The program exits when the count reaches 0");
+    printw("Press F1 to exit");
     
     refresh();
     
-    fft_frame = create_newwin(height, width, starty, startx);
+    fft_frame = create_newwin(height, width, starty-5, startx);
+    audio_frame = create_newwin(height, width, starty*4, startx);
     
-    int count_down = 1000;
-    if (argc == 3)
-        count_down = strtoimax(argv[2],NULL,10);
-    while(count_down--)
+
+    while((ch = getch()) != KEY_F(1))
     {
         if ((err = snd_pcm_readi (capture_handle, buffer, buffer_frames)) != buffer_frames) {
-            printf("read from audio interface failed (%s)\n",
+            printf("read from audio interface failed (%d) - %s\n",
                      err, snd_strerror (err));
             exit (1);
         }
+        // Get samples
         for (int n = 0; n < N_SAMPLES; n++){
-            fft_output[n] = buffer[n*2] + LEVEL_ZERO;
+            samples[n] = buffer[n*2];
         }
         
-        draw_spectrum(fft_frame, fft_output, N_SAMPLES);
-        mvprintw(3,0,"Count down: %d",count_down);
+        for (int n = 0; n < N_SAMPLES; n++)
+            fft_input[n] = (double complex) samples[n];
+        
+        t = clock();
+
+        fft_compute(lookup, fft_input, fft_output, N_SAMPLES);
+        fft_abs(fft_output, fft_spectrum, N_SAMPLES);
+        
+        t = clock() - t;
+        elapsed_time = ((double) t) / CLOCKS_PER_SEC * 1000000.;
+        
+        // Normalize
+        for (int n = 0; n < N_SAMPLES; n++)
+            fft_spectrum[n] = 2*fft_spectrum[n]/(NORM_FACTOR/N_SAMPLES);
+        
+        draw_spectrum(fft_frame, fft_spectrum, N_SAMPLES/4);
+        
+        for (int i=0;i<N_SAMPLES;i++)
+            samples[i] = LEVEL_ZERO + samples[i];
+        draw_wave(audio_frame,samples,N_SAMPLES);
+        
+        mvprintw(0,20,"FFT Size: %d \t Sampling Frequency: %dHz \t Calc time: %.2lfms  ",N_SAMPLES,rate,elapsed_time);
+        mvprintw(1,0,"%d",x);
         refresh();
+        x++;
     }
     
     endwin();
@@ -183,10 +221,9 @@ int main(int argc, char *argv[])
     exit (0);
 }
 
-int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size)
+int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size)
 {
     int height, width, spaces, group_size, y;
-
     float norm_factor, temp;
     
     getmaxyx(local_win, height, width);
@@ -202,9 +239,10 @@ int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size)
 
     group_size = fft_size / (spaces + 1);
     
-    norm_factor = (float) height / NORM_FACTOR;
+    norm_factor = (float) (height-1) / NORM_FACTOR;
     wclear(local_win);
-    //wattrset(local_win,A_REVERSE);
+    box(local_win, 0 , 0);
+    
     for (int k = 0; k < spaces; k++)
     {
         temp = 0;
@@ -212,18 +250,113 @@ int draw_spectrum(WINDOW *local_win, int *fft_vector, int fft_size)
             temp = temp + fft_vector[k*group_size + g];
         
         temp = temp / group_size;
-        y = height - 2 - temp*norm_factor;
-        mvwaddch(local_win,y,k+1,'*');
-//         for(y = height-2; y > height - 2 - temp*norm_factor; y--)
-//                 mvwaddch(local_win,y,k+1,'U');
-        
+        wattron(local_win,A_REVERSE);
+        for(y = height - 2; y > height - 1 - temp*norm_factor; y--)
+            mvwaddch(local_win,y,k+1,' ');
+        wattroff(local_win,A_REVERSE);
+
     }
-    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
-    wrefresh(local_win);
     
+    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
+    mvwaddch(local_win,height-1,width/4*1,'|');
+    mvwaddch(local_win,height-1,width/4*2,'|');
+    mvwaddch(local_win,height-1,width/4*3,'|');
+    
+    wrefresh(local_win);
     
     return 0;    
 }
+
+int draw_wave(WINDOW *local_win, int *samples, int size)
+{
+    int height, width, spaces, start_pos = 0, y;
+    const int hysteresis = 10000, trig_w = 3;
+    int low_side, high_side;
+    float norm_factor, temp;
+    
+    getmaxyx(local_win, height, width);
+    spaces = width - 2;
+    
+    // Unable to print (at least for now)
+    if (spaces > size)
+    {
+        mvwprintw(local_win,1,1,"Input vector too small.\n");
+        wrefresh(local_win);
+        return -1;
+    }
+    
+    // Trigger
+//     for (int l = 50; l < size-50; l++){
+//         low_side = (samples[l - trig_w] + samples[l-1- trig_w] + samples[l-2- trig_w] + samples[l-3- trig_w])/4;
+//         high_side = (samples[l+trig_w] + samples[l+1+trig_w] + samples[l+2+trig_w] + samples[l+3+trig_w])/4;
+//         if (low_side < LEVEL_ZERO && (high_side > LEVEL_ZERO + hysteresis))
+//             start_pos = l;
+//     }
+        
+    norm_factor = (float) height / NORM_FACTOR;
+    wclear(local_win);
+    box(local_win, 0 , 0);
+    
+    for (int k = 0; k < spaces; k++)
+    {
+        temp = samples[k + start_pos];
+        y = height - temp*norm_factor;
+        mvwaddch(local_win,y,k+1,'*');
+    }
+    
+    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
+    
+    wrefresh(local_win);
+    
+    return 0;    
+}
+
+
+/*
+ * int draw_wave(WINDOW *local_win, int *samples, int size)
+ * {
+ *    int height, width, spaces, group_size, y;
+ *    
+ *    float norm_factor, temp;
+ *    
+ *    getmaxyx(local_win, height, width);
+ *    spaces = width - 2;
+ *    
+ *    // Unable to print (at least for now)
+ *    if (spaces > size)
+ *    {
+ *        mvwprintw(local_win,1,1,"Input vector too small.\n");
+ *        wrefresh(local_win);
+ *        return -1;
+ *    }
+ *    
+ *    group_size = size / (spaces + 1);
+ *    
+ *    norm_factor = (float) height / NORM_FACTOR;
+ *    wclear(local_win);
+ *    box(local_win, 0 , 0);
+ *    
+ *    for (int k = 0; k < spaces; k++)
+ *    {
+ *        temp = 0;
+ *        for(int g = 0; g < group_size; g++)
+ *            temp = temp + samples[k*group_size + g];
+ *        
+ *        temp = temp / group_size;
+ *        
+ *        y = height - temp*norm_factor;
+ *        mvwaddch(local_win,y,k+1,'*');
+ *    }
+ *    
+ *    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
+ *    
+ *    wrefresh(local_win);
+ *    
+ *    return 0;    
+ * }
+ */
+
+
 
 WINDOW *create_newwin(int height, int width, int starty, int startx)
 {
