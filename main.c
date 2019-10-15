@@ -18,7 +18,6 @@
         COLOR_WHITE   7
 */
 
-#define N_SAMPLES           1024
 #define NORM_FACTOR         16384
 #define LEVEL_ZERO          NORM_FACTOR/2
 #define PERCENT_FRAME_Y     0.9
@@ -31,24 +30,33 @@ void destroy_win(WINDOW *local_win);
 int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size);
 int draw_wave(WINDOW *local_win, int *samples, int size);
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
+    
+    double PI = acos(-1);
+    
+    const char window_func_names[2][15] = {"Rectangular","Hanning"};
     int ch;
+    int win_func_sel = 0;
     int x = 0;
-    int avrg = 10;
+    int n_samples = 2048;
     
     clock_t t;
     double elapsed_time;
     
     // fft_buffer
-    int samples[N_SAMPLES];
-    unsigned int fft_spectrum[N_SAMPLES];
-    double complex fft_input[N_SAMPLES];
-    double complex fft_output[N_SAMPLES];
+    int samples[n_samples];
+    double *window_function;
+    unsigned int fft_spectrum[n_samples];
+    double complex fft_input[n_samples];
+    double complex fft_output[n_samples];
     double complex *lookup;
     
     // FFT inicialization
-    lookup = fft_create_lookup(N_SAMPLES);
+    lookup = fft_create_lookup(n_samples);
+    window_function = (double*) malloc(sizeof(double)*n_samples);
+    
+    for(int n = 0; n < n_samples; n++)
+        window_function[n] = 1;
     
     WINDOW *fft_frame; // Frame for the fft
     WINDOW *audio_frame; // Frame for the fft
@@ -58,89 +66,78 @@ int main(int argc, char *argv[])
     int err;
     char *capture_device = "default";
     short *buffer;
-    short buffer_frames = N_SAMPLES*2;
+    short buffer_frames = n_samples*2;
     unsigned int rate = 44100;
     snd_pcm_t *capture_handle;
     snd_pcm_hw_params_t *hw_params;
-    snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
+    snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;  
     
-       
     // Alsa inicialization
     if (argc > 1)
         capture_device = argv[1];
     
     if ((err = snd_pcm_open (&capture_handle, capture_device, SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-        printf("cannot open audio device %s (%s)\n", 
-                 argv[1],
-                 snd_strerror (err));
+        printf("cannot open audio device %s (%s)\n", capture_device, snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "audio interface opened\n");
+    printf("audio interface opened\n");
     
     if ((err = snd_pcm_hw_params_malloc (&hw_params)) < 0) {
-        printf("cannot allocate hardware parameter structure (%s)\n",
-                 snd_strerror (err));
+        printf("cannot allocate hardware parameter structure (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params allocated\n");
+    printf("hw_params allocated\n");
     
     if ((err = snd_pcm_hw_params_any (capture_handle, hw_params)) < 0) {
-        printf("cannot initialize hardware parameter structure (%s)\n",
-                 snd_strerror (err));
+        printf("cannot initialize hardware parameter structure (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params initialized\n");
+    printf("hw_params initialized\n");
     
     if ((err = snd_pcm_hw_params_set_access (capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-        printf("cannot set access type (%s)\n",
-                 snd_strerror (err));
+        printf("cannot set access type (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params access setted\n");
+    printf("hw_params access setted\n");
     
     if ((err = snd_pcm_hw_params_set_format (capture_handle, hw_params, format)) < 0) {
-        printf("cannot set sample format (%s)\n",
-                 snd_strerror (err));
+        printf("cannot set sample format (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params format setted\n");
+    printf("hw_params format setted\n");
     
     if ((err = snd_pcm_hw_params_set_rate_near (capture_handle, hw_params, &rate, 0)) < 0) {
-        printf("cannot set sample rate (%s)\n",
-                 snd_strerror (err));
+        printf("cannot set sample rate (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params rate setted\n");
+    printf("hw_params rate setted\n");
     
     if ((err = snd_pcm_hw_params_set_channels (capture_handle, hw_params, 2)) < 0) {
-        printf("cannot set channel count (%s)\n",
-                 snd_strerror (err));
+        printf("cannot set channel count (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params channels setted\n");
+    printf("hw_params channels setted\n");
     
     if ((err = snd_pcm_hw_params (capture_handle, hw_params)) < 0) {
-        printf("cannot set parameters (%s)\n",
-                 snd_strerror (err));
+        printf("cannot set parameters (%s)\n", snd_strerror (err));
         exit (1);
     }
     
-    fprintf(stdout, "hw_params setted\n");
+    printf("hw_params setted\n");
     
     snd_pcm_hw_params_free (hw_params);
     
-    fprintf(stdout, "hw_params freed\n");
+    printf("hw_params freed\n");
     
     if ((err = snd_pcm_prepare (capture_handle)) < 0) {
-        printf("cannot prepare audio interface for use (%s)\n",
-                 snd_strerror (err));
+        printf("cannot prepare audio interface for use (%s)\n", snd_strerror (err));
         exit (1);
     }
     
@@ -158,7 +155,7 @@ int main(int argc, char *argv[])
     
     height = LINES*PERCENT_FRAME_Y/2;
     width = COLS*PERCENT_FRAME_X;
-    //width = 128;
+
     starty = (LINES - height) / 4;
     startx = (COLS - width) / 2;
     
@@ -169,92 +166,124 @@ int main(int argc, char *argv[])
     fft_frame = create_newwin(height, width, starty-5, startx);
     audio_frame = create_newwin(height, width, starty*4, startx);
     
-
-    while((ch = getch()) != KEY_F(1))
-    {
+    
+    while((ch = getch()) != KEY_F(1)){
+        
+        switch(ch){
+            case 'w':
+                n_samples = n_samples < 2048? n_samples << 1: n_samples;
+                buffer_frames = n_samples * 2;
+                free(lookup);
+                lookup = fft_create_lookup(n_samples);
+                break;
+            case 's':
+                n_samples = n_samples > 32? n_samples >> 1: n_samples;
+                buffer_frames = n_samples * 2;
+                free(lookup);
+                lookup = fft_create_lookup(n_samples);
+                break;
+            case 'q':
+                win_func_sel ^= 1;
+                if (win_func_sel == 0)
+                    for(int n = 0; n < n_samples; n++)
+                        window_function[n] = 1;
+                if (win_func_sel == 1)
+                    for(int n = 0; n < n_samples; n++){
+                        double sin_2 = sin(PI*n/n_samples);
+                        sin_2 = sin_2 * sin_2;
+                        window_function[n] = sin_2;
+                    }
+                break;
+                
+        }
+        
         if ((err = snd_pcm_readi (capture_handle, buffer, buffer_frames)) != buffer_frames) {
-            printf("read from audio interface failed (%d) - %s\n",
-                     err, snd_strerror (err));
+            printf("read from audio interface failed (%d) - %s\n", err, snd_strerror (err));
             exit (1);
         }
         // Get samples
-        for (int n = 0; n < N_SAMPLES; n++){
+        for (int n = 0; n < n_samples; n++){
             samples[n] = buffer[n*2];
         }
         
-        for (int n = 0; n < N_SAMPLES; n++)
-            fft_input[n] = (double complex) samples[n];
-        
+        // Apply window function
+        for (int n = 0; n < n_samples; n++){
+            
+            fft_input[n] = (double complex) samples[n] * window_function[n];
+        }
         t = clock();
 
-        fft_compute(lookup, fft_input, fft_output, N_SAMPLES);
-        fft_abs(fft_output, fft_spectrum, N_SAMPLES);
+        fft_compute(lookup, fft_input, fft_output, n_samples);
+        fft_abs(fft_output, fft_spectrum, n_samples);
         
         t = clock() - t;
         elapsed_time = ((double) t) / CLOCKS_PER_SEC * 1000000.;
         
         // Normalize
-        for (int n = 0; n < N_SAMPLES; n++)
-            fft_spectrum[n] = 2*fft_spectrum[n]/(NORM_FACTOR/N_SAMPLES);
+        for (int n = 0; n < n_samples; n++)
+            fft_spectrum[n] = fft_spectrum[n];
         
-        draw_spectrum(fft_frame, fft_spectrum, N_SAMPLES/4);
+        draw_spectrum(fft_frame, fft_spectrum, n_samples/2);
         
-        for (int i=0;i<N_SAMPLES;i++)
+        for (int i=0;i<n_samples;i++)
             samples[i] = LEVEL_ZERO + samples[i];
-        draw_wave(audio_frame,samples,N_SAMPLES);
+        draw_wave(audio_frame,samples,n_samples);
         
-        mvprintw(0,20,"FFT Size: %d \t Sampling Frequency: %dHz \t Calc time: %.2lfms  ",N_SAMPLES,rate,elapsed_time);
+        mvprintw(0,20,"FFT Size: %d \t Sampling Frequency: %dHz \t%s \t Calc time: %.2lfms  ",n_samples,rate,window_func_names[win_func_sel],elapsed_time);
         mvprintw(1,0,"%d",x);
         refresh();
-        x++;
+        x++;  
     }
+    
     
     endwin();
     
     free(buffer);
-    
-    fprintf(stdout, "buffer freed\n");
+    free(window_function);
+    printf("buffer freed\n");
     
     snd_pcm_close (capture_handle);
-    fprintf(stdout, "audio interface closed\n");
+    printf("audio interface closed\n");
     
     exit (0);
 }
 
-int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size)
-{
+int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size){
+    
     int height, width, spaces, group_size, y;
     float norm_factor, temp;
     
     getmaxyx(local_win, height, width);
     spaces = width - 2;
     
+    norm_factor = (float) (height-1) / (NORM_FACTOR*32);
+    wclear(local_win);
+    box(local_win, 0, 0);
+    
     // Unable to print (at least for now)
-    if (spaces > fft_size)
-    {
+    if (spaces > fft_size){
         mvwprintw(local_win,1,1,"Input vector too small.\n");
         wrefresh(local_win);
-        return -1;
-    }
-
-    group_size = fft_size / (spaces + 1);
-    
-    norm_factor = (float) (height-1) / NORM_FACTOR;
-    wclear(local_win);
-    box(local_win, 0 , 0);
-    
-    for (int k = 0; k < spaces; k++)
-    {
-        temp = 0;
-        for(int g = 0; g < group_size; g++)
-            temp = temp + fft_vector[k*group_size + g];
+//         return -1;
+        group_size = (spaces)/fft_size;
         
-        temp = temp / group_size;
-        wattron(local_win,A_REVERSE);
-        for(y = height - 2; y > height - 1 - temp*norm_factor; y--)
-            mvwaddch(local_win,y,k+1,' ');
-        wattroff(local_win,A_REVERSE);
-
+            
+        
+    } else {
+        
+        group_size = fft_size / (spaces + 1);
+ 
+        for (int k = 0; k < spaces; k++){
+            temp = 0;
+            for(int g = 0; g < group_size; g++)
+                temp = temp + fft_vector[k*group_size + g];
+            
+            temp = temp / group_size;
+            wattron(local_win,A_REVERSE);
+            for(y = height - 2; y > height - 1 - temp*norm_factor; y--)
+                mvwaddch(local_win,y,k+1,' ');
+            wattroff(local_win,A_REVERSE);
+        }
     }
     
     mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
@@ -267,31 +296,13 @@ int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size)
     return 0;    
 }
 
-int draw_wave(WINDOW *local_win, int *samples, int size)
-{
+int draw_wave(WINDOW *local_win, int *samples, int size){
+    
     int height, width, spaces, start_pos = 0, y;
-    const int hysteresis = 10000, trig_w = 3;
-    int low_side, high_side;
     float norm_factor, temp;
     
     getmaxyx(local_win, height, width);
     spaces = width - 2;
-    
-    // Unable to print (at least for now)
-    if (spaces > size)
-    {
-        mvwprintw(local_win,1,1,"Input vector too small.\n");
-        wrefresh(local_win);
-        return -1;
-    }
-    
-    // Trigger
-//     for (int l = 50; l < size-50; l++){
-//         low_side = (samples[l - trig_w] + samples[l-1- trig_w] + samples[l-2- trig_w] + samples[l-3- trig_w])/4;
-//         high_side = (samples[l+trig_w] + samples[l+1+trig_w] + samples[l+2+trig_w] + samples[l+3+trig_w])/4;
-//         if (low_side < LEVEL_ZERO && (high_side > LEVEL_ZERO + hysteresis))
-//             start_pos = l;
-//     }
         
     norm_factor = (float) height / NORM_FACTOR;
     wclear(local_win);
@@ -311,55 +322,8 @@ int draw_wave(WINDOW *local_win, int *samples, int size)
     return 0;    
 }
 
-
-/*
- * int draw_wave(WINDOW *local_win, int *samples, int size)
- * {
- *    int height, width, spaces, group_size, y;
- *    
- *    float norm_factor, temp;
- *    
- *    getmaxyx(local_win, height, width);
- *    spaces = width - 2;
- *    
- *    // Unable to print (at least for now)
- *    if (spaces > size)
- *    {
- *        mvwprintw(local_win,1,1,"Input vector too small.\n");
- *        wrefresh(local_win);
- *        return -1;
- *    }
- *    
- *    group_size = size / (spaces + 1);
- *    
- *    norm_factor = (float) height / NORM_FACTOR;
- *    wclear(local_win);
- *    box(local_win, 0 , 0);
- *    
- *    for (int k = 0; k < spaces; k++)
- *    {
- *        temp = 0;
- *        for(int g = 0; g < group_size; g++)
- *            temp = temp + samples[k*group_size + g];
- *        
- *        temp = temp / group_size;
- *        
- *        y = height - temp*norm_factor;
- *        mvwaddch(local_win,y,k+1,'*');
- *    }
- *    
- *    mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
- *    
- *    wrefresh(local_win);
- *    
- *    return 0;    
- * }
- */
-
-
-
-WINDOW *create_newwin(int height, int width, int starty, int startx)
-{
+WINDOW *create_newwin(int height, int width, int starty, int startx){
+    
     WINDOW *local_win;
     
     local_win = newwin(height, width, starty, startx);
