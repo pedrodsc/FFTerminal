@@ -73,8 +73,10 @@ int main(int argc, char *argv[]){
     snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;  
     
     // Alsa inicialization
-    if (argc > 1)
+    if (argc > 2){
         capture_device = argv[1];
+        rate = strtoimax(argv[2],NULL,10);
+    }
     
     if ((err = snd_pcm_open (&capture_handle, capture_device, SND_PCM_STREAM_CAPTURE, 0)) < 0) {
         printf("cannot open audio device %s (%s)\n", capture_device, snd_strerror (err));
@@ -143,7 +145,6 @@ int main(int argc, char *argv[]){
     
     printf("audio interface prepared\n");
     buffer = malloc(buffer_frames * snd_pcm_format_width(format) / 8 * 2);
-    printf("frame size %u\n",snd_pcm_format_width(format));
     printf("buffer allocated\n");
     
     // Start curses
@@ -165,7 +166,6 @@ int main(int argc, char *argv[]){
     
     fft_frame = create_newwin(height, width, starty-5, startx);
     audio_frame = create_newwin(height, width, starty*4, startx);
-    
     
     while((ch = getch()) != KEY_F(1)){
         
@@ -194,7 +194,6 @@ int main(int argc, char *argv[]){
                         window_function[n] = sin_2;
                     }
                 break;
-                
         }
         
         if ((err = snd_pcm_readi (capture_handle, buffer, buffer_frames)) != buffer_frames) {
@@ -235,7 +234,6 @@ int main(int argc, char *argv[]){
         x++;  
     }
     
-    
     endwin();
     
     free(buffer);
@@ -250,7 +248,7 @@ int main(int argc, char *argv[]){
 
 int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size){
     
-    int height, width, spaces, group_size, y;
+    int height, width, spaces, group_size, y, k;
     float norm_factor, temp;
     
     getmaxyx(local_win, height, width);
@@ -263,27 +261,29 @@ int draw_spectrum(WINDOW *local_win, unsigned int *fft_vector, int fft_size){
     // Unable to print (at least for now)
     if (spaces > fft_size){
         mvwprintw(local_win,1,1,"Input vector too small.\n");
-        wrefresh(local_win);
 //         return -1;
-        group_size = (spaces)/fft_size;
-        
+        wattron(local_win,A_REVERSE);
+        for (k = 0; k < fft_size; k++)
+                for(y = height - 2; y > height - 1 - fft_vector[k]*norm_factor; y--)
+                    mvwaddch(local_win,y,k+1,' ');
             
-        
+        wattroff(local_win,A_REVERSE);
+        wrefresh(local_win);
     } else {
         
         group_size = fft_size / (spaces + 1);
- 
-        for (int k = 0; k < spaces; k++){
+        wattron(local_win,A_REVERSE);
+        for (k = 0; k < spaces; k++){
             temp = 0;
             for(int g = 0; g < group_size; g++)
                 temp = temp + fft_vector[k*group_size + g];
             
             temp = temp / group_size;
-            wattron(local_win,A_REVERSE);
+            
             for(y = height - 2; y > height - 1 - temp*norm_factor; y--)
                 mvwaddch(local_win,y,k+1,' ');
-            wattroff(local_win,A_REVERSE);
         }
+        wattroff(local_win,A_REVERSE);
     }
     
     mvwprintw(local_win,height-1,0,"H:%d W:%d",height,width);
